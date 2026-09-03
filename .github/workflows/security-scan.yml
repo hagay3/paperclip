@@ -1,0 +1,62 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  dizzy-scan:
+    name: dizzy-scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache dizzy-scan tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.dizzy-scan/bin
+          key: dizzy-scan-tools-v1
+
+      - name: Download dizzy-scan (latest)
+        run: |
+          curl -sSL \
+            https://github.com/hagay3/dizzy-releases/releases/latest/download/dizzy-scan-linux-amd64 \
+            -o /usr/local/bin/dizzy-scan
+          chmod +x /usr/local/bin/dizzy-scan
+
+      - name: Print dizzy-scan version
+        run: dizzy-scan --version
+
+      - name: Check DIZZY_API_KEY is set
+        run: |
+          if [ -z "${{ secrets.DIZZY_API_KEY }}" ]; then
+            echo "ERROR: DIZZY_API_KEY secret is not set"
+            exit 1
+          fi
+
+      - name: Validate API key
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.DIZZY_API_KEY }}" \
+            https://api.dizzysecurity.com/api/v1/data/api-keys/test)
+          if [ "$STATUS" != "200" ]; then
+            echo "ERROR: API key validation failed (HTTP $STATUS)"
+            exit 1
+          fi
+          echo "API key valid (HTTP $STATUS)"
+
+      - name: Run dizzy-scan
+        env:
+          DIZZY_API_KEY: ${{ secrets.DIZZY_API_KEY }}
+        run: dizzy-scan --sarif-output dizzy-scan.sarif .
+        continue-on-error: true
